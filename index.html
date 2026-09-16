@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>反圖靈測試 - 互動展演</title>
+  
+  <!-- 1. PaperCSS 手繪風格框架 -->
+  <link rel="stylesheet" href="https://unpkg.com/papercss@1.9.2/dist/paper.min.css">
+  
+  <!-- 2. Rough Notation 手繪塗鴉標示套件 -->
+  <script type="module" src="https://unpkg.com/rough-notation?module"></script>
+  
+  <!-- 3. Google Fonts: 日系手寫感字體 Zen Kurenaido -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Kurenaido&display=swap" rel="stylesheet">
+
+  <style>
+    /* 全域日系冷色微復古調色 */
+    body {
+      background-color: #FBF8F1; /* 指定奶油白背景 */
+      font-family: 'Zen Kurenaido', sans-serif, system-ui;
+      color: #2B3A42;            /* 冷色調：深藍灰內文 */
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 20px;
+    }
+
+    /* 手繪卡片容器與冷色柔和陰影 */
+    .quiz-card {
+      background-color: #FFFFFF;
+      max-width: 580px;
+      width: 100%;
+      padding: 2.5rem;
+      border-color: #3F51B5 !important; /* 冷色系不規則邊框 */
+      box-shadow: 8px 12px 20px rgba(63, 81, 181, 0.08), 
+                  -4px -4px 12px rgba(255, 255, 255, 0.9) !important;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      opacity: 1;
+      transform: translateY(0);
+      position: relative;
+    }
+
+    /* 卡片頂部功能欄 */
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    /* 全螢幕切換按鈕 */
+    .fullscreen-btn {
+      background-color: #E8EAF6 !important;
+      color: #3F51B5 !important;
+      border-color: #7986CB !important;
+      font-size: 0.85rem !important;
+      padding: 4px 10px !important;
+      margin: 0 !important;
+      cursor: pointer;
+      transition: all 0.2s ease !important;
+    }
+
+    .fullscreen-btn:hover {
+      background-color: #C5CAE9 !important;
+    }
+
+    /* 切換題目時的淡出效果 */
+    .fade-out {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    /* 題目文字樣式 */
+    .question-title {
+      font-size: 1.35rem;
+      line-height: 1.8;
+      color: #1A237E; /* 深深藍 */
+      margin-bottom: 2rem;
+    }
+
+    /* 選項按鈕排版與冷色調 */
+    .option-group {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .btn-option {
+      background-color: #F4F6F9 !important;
+      color: #2C3E50 !important;
+      border-color: #5C6BC0 !important;
+      font-size: 1.1rem;
+      text-align: center;
+      padding: 0.8rem !important;
+      cursor: pointer;
+      transition: all 0.2s ease !important;
+    }
+
+    .btn-option:hover {
+      background-color: #E8EAF6 !important;
+      transform: scale(1.02);
+    }
+
+    /* 錯誤結束提示訊息 */
+    .error-notice {
+      color: #C62828;
+      font-size: 1.4rem;
+      text-align: center;
+      font-weight: bold;
+      padding: 1rem 0;
+    }
+
+    /* 題號標記 */
+    .step-badge {
+      display: inline-block;
+      color: #3F51B5;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="paper container quiz-card" id="quiz-box">
+    <!-- 頁頭：題號與全螢幕按鈕 -->
+    <div class="card-header">
+      <div class="step-badge" id="step-badge">QUESTION 01</div>
+      <button id="fullscreen-btn" class="fullscreen-btn" onclick="toggleFullScreen()">⛶ 全螢幕</button>
+    </div>
+    
+    <!-- 題目內容 -->
+    <div class="question-title" id="question-text">
+      載入中...
+    </div>
+
+    <!-- 選項區域 -->
+    <div class="option-group" id="option-group">
+      <button class="btn-option" onclick="selectOption('是')">＜是＞</button>
+      <button class="btn-option" onclick="selectOption('否')">＜否＞</button>
+      <button class="btn-option" onclick="selectOption('拒絕回答')">＜拒絕回答＞</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { annotate } from 'https://unpkg.com/rough-notation?module';
+
+    // ─────────────────────────────────────────────────────────────
+    // ⚠️ 1. 手動修改處：請填入運行 TouchDesigner 筆電的真實 IP 位址
+    // ─────────────────────────────────────────────────────────────
+    const LAPTOP_IP = "192.168.0.112"; // 請改為你的筆電區域網路 IP
+    const WS_PORT = "8080";
+    
+    // 連線至筆電上的 TouchDesigner WebSocket 伺服器
+    const socket = new WebSocket(`ws://${LAPTOP_IP}:${WS_PORT}`);
+
+    socket.onopen = () => {
+      console.log("[WebSocket] 已成功連線至 TouchDesigner！");
+    };
+
+    socket.onerror = (err) => {
+      console.error("[WebSocket] 連線失敗，請檢查筆電 IP 或 TouchDesigner 是否開啟 WebSocket Server", err);
+    };
+
+    // 統一封包傳送函式
+    function sendToTouchDesigner(eventType, payload) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          event: eventType,
+          payload: payload,
+          timestamp: Date.now()
+        }));
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 2. 問答核心與行為監聽邏輯
+    // ─────────────────────────────────────────────────────────────
+    const questions = [
+      "你能接受一個完美複製你人格記憶的仿生人取代你嗎",
+      "你經歷的感官體會，可以用數據完全模擬出來嗎？",
+      "你確定你現在不是在作夢，是處於現實裡嗎？"
+
+    ];
+
+    let currentIndex = 0;
+    let startTime = performance.now();
+    let leaveCount = 0;
+
+    const quizBox = document.getElementById('quiz-box');
+    const questionText = document.getElementById('question-text');
+    const stepBadge = document.getElementById('step-badge');
+    const optionGroup = document.getElementById('option-group');
+
+    // 行為偵測：監聽使用者是否切換視窗 / 分頁
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        leaveCount++;
+        sendToTouchDesigner("tab_switch", {
+          questionIndex: currentIndex + 1,
+          switchCount: leaveCount
+        });
+      }
+    });
+
+    // 實時停留時間發射器（每 0.5 秒向 TouchDesigner 更新一次時間，驅動視覺漸變）
+    setInterval(() => {
+      if (currentIndex < questions.length) {
+        const hoverSecs = ((performance.now() - startTime) / 1000).toFixed(1);
+        sendToTouchDesigner("time_tick", {
+          questionIndex: currentIndex + 1,
+          hoverTimeSeconds: parseFloat(hoverSecs)
+        });
+      }
+    }, 500);
+
+    // 全螢幕切換功能
+    window.toggleFullScreen = function() {
+      const btn = document.getElementById('fullscreen-btn');
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+        else if (document.documentElement.webkitRequestFullscreen) document.documentElement.webkitRequestFullscreen();
+        btn.innerText = "✕ 退出全螢幕";
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        btn.innerText = "⛶ 全螢幕";
+      }
+    };
+
+    // 渲染題目與手繪標記
+    function renderQuestion() {
+      stepBadge.innerText = `QUESTION 0${currentIndex + 1} / 03`;
+      questionText.innerText = questions[currentIndex];
+      startTime = performance.now();
+
+      const annotation = annotate(stepBadge, { 
+        type: 'underline', color: '#7986CB', strokeWidth: 2, padding: 3
+      });
+      annotation.show();
+    }
+
+    // 選擇答案與切換
+    window.selectOption = function(optionValue) {
+      const timeSpent = ((performance.now() - startTime) / 1000).toFixed(2);
+      
+      // 即時發送答案與該題總耗時給 TouchDesigner
+      sendToTouchDesigner("answer_submit", {
+        questionIndex: currentIndex + 1,
+        chosenOption: optionValue,
+        timeSpentSeconds: parseFloat(timeSpent)
+      });
+
+      quizBox.classList.add('fade-out');
+
+      setTimeout(() => {
+        currentIndex++;
+        if (currentIndex < questions.length) {
+          renderQuestion();
+          quizBox.classList.remove('fade-out');
+        } else {
+          renderFinalNotice();
+          quizBox.classList.remove('fade-out');
+          sendToTouchDesigner("quiz_complete", { status: "finished" });
+        }
+      }, 400);
+    };
+
+    // 結束畫面
+    function renderFinalNotice() {
+      stepBadge.style.display = 'none';
+      optionGroup.style.display = 'none';
+      questionText.innerHTML = `<div class="error-notice" id="error-text">狀況有誤，請洽詢客服專線。</div>`;
+
+      setTimeout(() => {
+        const errorEl = document.getElementById('error-text');
+        const boxAnnotation = annotate(errorEl, { 
+          type: 'box', color: '#E53935', strokeWidth: 2.5, padding: 10
+        });
+        boxAnnotation.show();
+      }, 100);
+    }
+
+    renderQuestion();
+  </script>
+</body>
+</html>
